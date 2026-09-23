@@ -18,17 +18,17 @@ namespace Sigil.NonGeneric
     /// </summary>
     public partial class Emit
     {
-        private Emit<NonGenericPlaceholderDelegate> InnerEmit;
-        private Module Module;
-        private string Name;
-        private Type ReturnType;
-        private Type[] ParameterTypes;
+        private readonly Emit<NonGenericPlaceholderDelegate> InnerEmit;
+        private readonly Module Module;
+        private readonly string Name;
+        private readonly Type ReturnType;
+        private readonly Type[] ParameterTypes;
 
         private Delegate CreatedDelegate;
         private MethodBuilder CreatedMethod;
         private ConstructorBuilder CreatedConstructor;
 
-        private NonGenericEmitType EmitType;
+        private readonly NonGenericEmitType EmitType;
 
         private TypeBuilder TypeBuilder;
         private MethodAttributes Attributes;
@@ -61,10 +61,14 @@ namespace Sigil.NonGeneric
         /// </summary>
         public bool AllowsUnverifiableCIL { get { return InnerEmit.AllowsUnverifiableCIL; } }
 
-        private Emit(Emit<NonGenericPlaceholderDelegate> innerEmit, NonGenericEmitType type)
+        private Emit(Emit<NonGenericPlaceholderDelegate> innerEmit, NonGenericEmitType type, string name, Module module, Type returnType, Type[] parameterTypes)
         {
             InnerEmit = innerEmit;
             EmitType = type;
+            Name = name;
+            Module = module;
+            ReturnType = returnType;
+            ParameterTypes = parameterTypes;
 
             innerEmit.IsBuildingConstructor = type == NonGenericEmitType.Constructor;
 
@@ -114,13 +118,7 @@ namespace Sigil.NonGeneric
 
             var innerEmit = Emit<NonGenericPlaceholderDelegate>.MakeNonGenericEmit(CallingConventions.Standard, returnType, parameterTypes, Emit<NonGenericPlaceholderDelegate>.AllowsUnverifiableCode(module), doVerify, strictBranchVerification);
 
-            var ret = new Emit(innerEmit, NonGenericEmitType.DynamicMethod);
-            ret.Module = module;
-            ret.Name = name ?? AutoNamer.Next("_DynamicMethod");
-            ret.ReturnType = returnType;
-            ret.ParameterTypes = parameterTypes;
-
-            return ret;
+            return new Emit(innerEmit, NonGenericEmitType.DynamicMethod, name ?? AutoNamer.Next("_DynamicMethod"), module, returnType, parameterTypes);
         }
 
         private void ValidateDelegateType(Type delegateType)
@@ -302,14 +300,14 @@ namespace Sigil.NonGeneric
             }
 
             var innerEmit = Emit<NonGenericPlaceholderDelegate>.MakeNonGenericEmit(callingConvention, returnType, parameterTypes, allowUnverifiableCode, doVerify, strictBranchVerification);
+            innerEmit.MtdBuilder = type.DefineMethod(name, attributes, callingConvention, returnType, passedParameterTypes);
 
-            var ret = new Emit(innerEmit, NonGenericEmitType.Method);
-            ret.Name = name;
-            ret.ReturnType = returnType;
-            ret.ParameterTypes = passedParameterTypes;
-            ret.Attributes = attributes;
-            ret.CallingConvention = callingConvention;
-            ret.TypeBuilder = type;
+            var ret = new Emit(innerEmit, NonGenericEmitType.Method, name, null, returnType, passedParameterTypes)
+            {
+                Attributes = attributes,
+                CallingConvention = callingConvention,
+                TypeBuilder = type
+            };
 
             return ret;
         }
@@ -360,10 +358,6 @@ namespace Sigil.NonGeneric
                 instructions = null;
                 return CreatedMethod;
             }
-
-            var methodBuilder = TypeBuilder.DefineMethod(Name, Attributes, CallingConvention, ReturnType, ParameterTypes);
-
-            InnerEmit.MtdBuilder = methodBuilder;
 
             CreatedMethod = InnerEmit.CreateMethod(out instructions, optimizationOptions);
 
@@ -425,12 +419,12 @@ namespace Sigil.NonGeneric
             var innerEmit = Emit<NonGenericPlaceholderDelegate>.MakeNonGenericEmit(callingConvention, typeof(void), parameterTypes, allowUnverifiableCode, doVerify, strictBranchVerification);
             innerEmit.ConstructorDefinedInType = TypeHelpers.AsType(type);
 
-            var ret = new Emit(innerEmit, NonGenericEmitType.Constructor);
-            ret.ReturnType = TypeHelpers.AsType(type);
-            ret.ParameterTypes = passedParameters;
-            ret.Attributes = attributes;
-            ret.CallingConvention = callingConvention;
-            ret.TypeBuilder = type;
+            var ret = new Emit(innerEmit, NonGenericEmitType.Constructor, null, null, TypeHelpers.AsType(type), passedParameters)
+            {
+                Attributes = attributes,
+                CallingConvention = callingConvention,
+                TypeBuilder = type
+            };
 
             return ret;
         }
@@ -449,7 +443,7 @@ namespace Sigil.NonGeneric
         /// </summary>
         public static Emit BuildTypeInitializer(TypeBuilder type, bool allowUnverifiableCode = false, bool doVerify = true, bool strictBranchVerification = false)
         {
-            if (type == null) 
+            if (type == null)
             {
                 throw new ArgumentNullException("type");
             }
@@ -457,9 +451,7 @@ namespace Sigil.NonGeneric
             var innerEmit = Emit<NonGenericPlaceholderDelegate>.MakeNonGenericEmit(CallingConventions.Standard, typeof(void), TypeHelpers.EmptyTypes, allowUnverifiableCode, doVerify, strictBranchVerification);
             innerEmit.ConstructorDefinedInType = TypeHelpers.AsType(type);
 
-            var ret = new Emit(innerEmit, NonGenericEmitType.TypeInitializer);
-            ret.ReturnType = TypeHelpers.AsType(type);
-            ret.ParameterTypes = TypeHelpers.EmptyTypes;
+            var ret = new Emit(innerEmit, NonGenericEmitType.TypeInitializer, null, null, TypeHelpers.AsType(type), TypeHelpers.EmptyTypes);
             ret.Attributes = 0;
             ret.CallingConvention = CallingConventions.Standard;
             ret.TypeBuilder = type;
@@ -536,13 +528,15 @@ namespace Sigil.NonGeneric
         /// behaves unexpectedly (indicative of a logic bug in the consumer code).
         /// </para>
         /// </summary>
-        public ConstructorBuilder CreateTypeInitializer(out string instructions, OptimizationOptions optimizationOptions = OptimizationOptions.All) 
+        public ConstructorBuilder CreateTypeInitializer(out string instructions, OptimizationOptions optimizationOptions = OptimizationOptions.All)
         {
-            if (EmitType != NonGenericEmitType.TypeInitializer) {
+            if (EmitType != NonGenericEmitType.TypeInitializer)
+            {
                 throw new InvalidOperationException("Emit was not created to build a type initializer, thus CreateTypeInitializer cannot be called");
             }
 
-            if (CreatedConstructor != null) {
+            if (CreatedConstructor != null)
+            {
                 instructions = null;
                 return CreatedConstructor;
             }
@@ -565,7 +559,7 @@ namespace Sigil.NonGeneric
         /// <para>Once this method is called the Emit may no longer be modified.</para>
         /// <para>Returns a ConstructorBuilder, which can be used to define overrides or for further inspection.</para>
         /// </summary>
-        public ConstructorBuilder CreateTypeInitializer(OptimizationOptions optimizationOptions = OptimizationOptions.All) 
+        public ConstructorBuilder CreateTypeInitializer(OptimizationOptions optimizationOptions = OptimizationOptions.All)
         {
             string ignored;
             return CreateTypeInitializer(out ignored, optimizationOptions);
