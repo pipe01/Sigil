@@ -61,6 +61,8 @@ namespace Sigil.NonGeneric
         /// </summary>
         public bool AllowsUnverifiableCIL { get { return InnerEmit.AllowsUnverifiableCIL; } }
 
+        public MethodBuilder MethodBuilder => InnerEmit.MtdBuilder;
+
         private Emit(Emit<NonGenericPlaceholderDelegate> innerEmit, NonGenericEmitType type, string name, Module module, Type returnType, Type[] parameterTypes)
         {
             InnerEmit = innerEmit;
