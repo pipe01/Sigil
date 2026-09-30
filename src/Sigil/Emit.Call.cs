@@ -223,6 +223,64 @@ namespace Sigil
             return this;
         }
 
+        /// <summary>
+        /// <para>Calls the given method.  Pops its arguments in reverse order (left-most deepest in the stack), and pushes the return value if it is non-void.</para>
+        /// <para>If the given method is an instance method, the `this` reference should appear before any parameters.</para>
+        /// <para>Call does not respect overrides, the implementation defined by the given MethodInfo is what will be called at runtime.</para>
+        /// <para>To call overrides of instance methods, use CallVirtual.</para>
+        /// <para>When calling VarArgs methods, arglist should be set to the types of the extra parameters to be passed.</para>
+        /// </summary>
+        public Emit<DelegateType> Call(MethodInfo method, Type[] parameters, Type returnType)
+        {
+            if (method == null)
+            {
+                throw new ArgumentNullException("method");
+            }
+
+            var expectedParams = ((LinqArray<Type>)parameters).Select(TypeOnStack.Get).ToList();
+
+            // Instance methods expect this to preceed parameters
+            if (HasFlag(method.CallingConvention, CallingConventions.HasThis))
+            {
+                var declaring = method.DeclaringType;
+
+                if (TypeHelpers.IsValueType(declaring))
+                {
+                    declaring = declaring.MakePointerType();
+                }
+
+                expectedParams.Insert(0, TypeOnStack.Get(declaring));
+            }
+
+            var resultType = returnType == typeof(void) ? null : TypeOnStack.Get(returnType);
+
+            var firstParamIsThis =
+                HasFlag(method.CallingConvention, CallingConventions.HasThis) ||
+                HasFlag(method.CallingConvention, CallingConventions.ExplicitThis);
+
+            IEnumerable<StackTransition> transitions;
+            if (resultType != null)
+            {
+                transitions =
+                    new[]
+                    {
+                        new StackTransition(expectedParams.Reverse().AsEnumerable(), new [] { resultType })
+                    };
+            }
+            else
+            {
+                transitions =
+                    new[]
+                    {
+                        new StackTransition(expectedParams.Reverse().AsEnumerable(), new TypeOnStack[0])
+                    };
+            }
+
+            UpdateState(OpCodes.Call, method, parameters, Wrap(transitions, "Call"), firstParamIsThis: firstParamIsThis);
+
+            return this;
+        }
+
         private bool IsLegalConstructoCall(ConstructorInfo cons)
         {
             var consDeclaredIn = cons.DeclaringType;
@@ -273,7 +331,7 @@ namespace Sigil
 
             expectedParams.Insert(0, TypeOnStack.Get(declaring));
 
-            var transitions = 
+            var transitions =
                 new[]
                 {
                     new StackTransition(expectedParams.Reverse().AsEnumerable(), new TypeOnStack[0])

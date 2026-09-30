@@ -18,6 +18,11 @@ namespace Sigil.NonGeneric
             return this;
         }
 
+        public Emit Call(MethodInfo method, Type[] parameters, Type returnType)
+        {
+            InnerEmit.Call(method, parameters, returnType);
+            return this;
+        }
 
         /// <summary>
         /// <para>Calls the given constructor.  Pops its arguments in reverse order (left-most deepest in the stack).</para>
@@ -46,7 +51,7 @@ namespace Sigil.NonGeneric
             {
                 throw new ArgumentNullException("emit");
             }
-            
+
             MethodInfo methodInfo = emit.InnerEmit.MtdBuilder ?? (MethodInfo)emit.InnerEmit.DynMethod;
             if (methodInfo == null)
             {
